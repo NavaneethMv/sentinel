@@ -1,0 +1,14 @@
+secrets:
+  - api_key
+  - password
+  - token
+  - secret
+  - private_key
+
+sinks:
+  - print
+  - log
+  - send
+  - write
+  - debug
+  - info

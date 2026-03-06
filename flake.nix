@@ -17,6 +17,8 @@
 
           packages = with pkgs; [
             python313
+            # Adding PyYAML here ensures system-level dependencies are met
+            python313Packages.pyyaml 
             uv
             ruff
             just
@@ -34,8 +36,12 @@
             fi
             source .venv/bin/activate
             
+            # Since you're using uv, you might want to ensure it's synced
+            # uv pip install pyyaml
+            
             echo "Python: $(python --version)"
             echo "UV: $(uv --version)"
+            echo "PyYAML: $(python -c 'import yaml; print("Installed")' 2>/dev/null || echo "Not found in venv")"
           '';
         };
       });

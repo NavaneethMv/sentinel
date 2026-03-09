@@ -11,4 +11,6 @@ def parse_file(file_name: str) -> None:
     config = load_config()
     tree = ast.parse(source)
     violations = analyze(tree, config)
-    Report(file_name, violations).print()
+    report = Report(file_name, violations)
+    report.print()
+    return report

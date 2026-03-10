@@ -1,8 +1,9 @@
+# taint.py
 import ast
 import ast
 from report import Violation
 from config import Config
-
+import dsl
 
 def is_tainted_arg(arg: ast.expr, tainted: set[str], config: Config, tainted_funcs: set[str]) -> bool:
     if isinstance(arg, ast.Name):
@@ -10,6 +11,12 @@ def is_tainted_arg(arg: ast.expr, tainted: set[str], config: Config, tainted_fun
             return True
 
     if isinstance(arg, ast.Subscript):
+        # check if the object is tainted: data['key'] where data is tainted
+        if isinstance(arg.value, ast.Name):
+            if arg.value.id in tainted:
+                return True
+
+        # check if the key is a secret name: data['api_key']
         if isinstance(arg.slice, ast.Constant):
             if arg.slice.value in tainted or arg.slice.value in config.secrets:
                 return True
@@ -26,14 +33,19 @@ def is_tainted_arg(arg: ast.expr, tainted: set[str], config: Config, tainted_fun
                     return True
 
     if isinstance(arg, ast.BinOp):
-        if is_tainted_arg(arg.left, tainted, config, tainted_funcs) or is_tainted_arg(arg.right, tainted, config, tainted_funcs):
+        if is_tainted_arg(arg.left, tainted, config, tainted_funcs) or \
+           is_tainted_arg(arg.right, tainted, config, tainted_funcs):
             return True
-    
-    
-    return False
-    
 
-def analyze(tree: ast.Module, config: Config) -> list[Violation]:
+    if isinstance(arg, ast.Dict):
+        for value in arg.values:
+            if is_tainted_arg(value, tainted, config, tainted_funcs):
+                return True
+
+    return False
+
+
+def analyze(tree: ast.Module, config: Config, rules: list[Rule] = []) -> list[Violation]:
     # names that suggest a variable holds a secret
     tainted = set()
 
@@ -43,25 +55,28 @@ def analyze(tree: ast.Module, config: Config) -> list[Violation]:
     # violations
     violations = []
 
-    # print the tree
+    return_to_func: dict[int, str] = {}
+
     # print(ast.dump(tree, indent=4))
 
-    # map each Return node to its parent function name
-    return_to_func: dict[int, str] = {}  # node id → function name
-    
     for node in ast.walk(tree):
-        
+
         if isinstance(node, ast.FunctionDef):
             for child in ast.walk(node):
                 if isinstance(child, ast.Return):
                     return_to_func[id(child)] = node.name
+                elif isinstance(child, ast.Assign):
+                    for target in child.targets:
+                        if isinstance(target, ast.Name):
+                            if target.id in config.secrets:
+                                tainted.add(target.id)
 
         # as function arguments
         if isinstance(node, ast.FunctionDef):
             for arg in node.args.args:
                 if arg.arg in config.secrets:
                     tainted.add(arg.arg)
-            
+
             for child in node.body:
                 if isinstance(child, ast.Return):
                     if child.value and is_tainted_arg(child.value, tainted, config, tainted_func):
@@ -76,6 +91,9 @@ def analyze(tree: ast.Module, config: Config) -> list[Violation]:
 
                     # catches secrets
                     if target.id in config.secrets:
+                        tainted.add(target.id)
+                    
+                    elif any(target.id == rule.source for rule in rules):
                         tainted.add(target.id)
 
                     # catches assignments to tainted variables
@@ -100,5 +118,17 @@ def analyze(tree: ast.Module, config: Config) -> list[Violation]:
                             line=node.lineno
                         ))
             
+            for rule in rules:
+                if name == rule.sink:
+                    for arg in node.args:
+                        if is_tainted_arg(arg, tainted, config, tainted_func):
+                            violations.append(Violation(
+                                var="secret",
+                                sink=name,
+                                line=node.lineno,
+                            ))
+
+
+
 
     return violations

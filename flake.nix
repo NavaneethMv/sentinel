@@ -19,6 +19,7 @@
             python313
             # Adding PyYAML here ensures system-level dependencies are met
             python313Packages.pyyaml 
+            python313Packages.lark
             uv
             ruff
             just

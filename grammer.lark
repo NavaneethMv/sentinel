@@ -1,0 +1,12 @@
+start: rule+    
+
+rule: "NEVER" ":" source "->" sink ";"
+
+source: NAME
+sink: NAME
+
+NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
+
+%import common.WORD
+%import common.WS
+%ignore WS

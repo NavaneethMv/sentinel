@@ -1,11 +1,13 @@
 # taint.py
-import ast
+from dsl import Rule
 import ast
 from report import Violation
 from config import Config
-import dsl
 
-def is_tainted_arg(arg: ast.expr, tainted: set[str], config: Config, tainted_funcs: set[str]) -> bool:
+
+def is_tainted_arg(
+    arg: ast.expr, tainted: set[str], config: Config, tainted_funcs: set[str]
+) -> bool:
     if isinstance(arg, ast.Name):
         if arg.id in tainted:
             return True
@@ -33,8 +35,9 @@ def is_tainted_arg(arg: ast.expr, tainted: set[str], config: Config, tainted_fun
                     return True
 
     if isinstance(arg, ast.BinOp):
-        if is_tainted_arg(arg.left, tainted, config, tainted_funcs) or \
-           is_tainted_arg(arg.right, tainted, config, tainted_funcs):
+        if is_tainted_arg(arg.left, tainted, config, tainted_funcs) or is_tainted_arg(
+            arg.right, tainted, config, tainted_funcs
+        ):
             return True
 
     if isinstance(arg, ast.Dict):
@@ -45,7 +48,9 @@ def is_tainted_arg(arg: ast.expr, tainted: set[str], config: Config, tainted_fun
     return False
 
 
-def analyze(tree: ast.Module, config: Config, rules: list[Rule] = []) -> list[Violation]:
+def analyze(
+    tree: ast.Module, config: Config, rules: list[Rule] = []
+) -> list[Violation]:
     # names that suggest a variable holds a secret
     tainted = set()
 
@@ -60,7 +65,6 @@ def analyze(tree: ast.Module, config: Config, rules: list[Rule] = []) -> list[Vi
     # print(ast.dump(tree, indent=4))
 
     for node in ast.walk(tree):
-
         if isinstance(node, ast.FunctionDef):
             for child in ast.walk(node):
                 if isinstance(child, ast.Return):
@@ -79,7 +83,9 @@ def analyze(tree: ast.Module, config: Config, rules: list[Rule] = []) -> list[Vi
 
             for child in node.body:
                 if isinstance(child, ast.Return):
-                    if child.value and is_tainted_arg(child.value, tainted, config, tainted_func):
+                    if child.value and is_tainted_arg(
+                        child.value, tainted, config, tainted_func
+                    ):
                         func_name = return_to_func.get(id(child))
                         if func_name:
                             tainted_func.add(func_name)
@@ -88,18 +94,16 @@ def analyze(tree: ast.Module, config: Config, rules: list[Rule] = []) -> list[Vi
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-
                     # catches secrets
                     if target.id in config.secrets:
                         tainted.add(target.id)
-                    
+
                     elif any(target.id == rule.source for rule in rules):
                         tainted.add(target.id)
 
                     # catches assignments to tainted variables
                     elif is_tainted_arg(node.value, tainted, config, tainted_func):
                         tainted.add(target.id)
-
 
         # when we see print(x) or send(x)
         if isinstance(node, ast.Call):
@@ -112,23 +116,20 @@ def analyze(tree: ast.Module, config: Config, rules: list[Rule] = []) -> list[Vi
             if name and name in config.sinks:
                 for arg in node.args:
                     if is_tainted_arg(arg, tainted, config, tainted_func):
-                        violations.append(Violation(
-                            var="secret",
-                            sink=name,
-                            line=node.lineno
-                        ))
-            
+                        violations.append(
+                            Violation(var="secret", sink=name, line=node.lineno)
+                        )
+
             for rule in rules:
                 if name == rule.sink:
                     for arg in node.args:
                         if is_tainted_arg(arg, tainted, config, tainted_func):
-                            violations.append(Violation(
-                                var="secret",
-                                sink=name,
-                                line=node.lineno,
-                            ))
-
-
-
+                            violations.append(
+                                Violation(
+                                    var="secret",
+                                    sink=name,
+                                    line=node.lineno,
+                                )
+                            )
 
     return violations

@@ -2,13 +2,13 @@ from pathlib import Path
 from typing import List
 import sys
 from parser import parse_file
-import sys
+
 
 def find_files(targets: List[str]) -> List[Path]:
     file_names = []
     for target in targets:
         path = Path(target)
-        if path.is_file() and path.suffix == '.py':
+        if path.is_file() and path.suffix == ".py":
             file_names.append(path)
         elif path.is_dir():
             file_names.extend(list(path.rglob("*.py")))
@@ -16,6 +16,7 @@ def find_files(targets: List[str]) -> List[Path]:
             continue
 
     return file_names
+
 
 def main():
     targets = sys.argv[1:]

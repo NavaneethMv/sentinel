@@ -1,13 +1,14 @@
-from dsl import load_rules
 import ast
-from taint import analyze
-from report import Report
-from config import load_config
 import os
+
+from config import load_config
+from dsl import load_rules
+from report import Report
+from taint import analyze
 
 
 def parse_file(file_name: str) -> None:
-    with open(file_name, "r") as f:
+    with open(file_name) as f:
         source = f.read()
 
     config = load_config()

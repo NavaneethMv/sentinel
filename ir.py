@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Union
 
 # --- Value types ---
 # every value in the program is one of these
@@ -31,7 +30,7 @@ class Unknown:
 
 
 # a Value is any of the above
-Value = Union[Constant, EnvValue, Tainted, Derived, Unknown]
+Value = Constant | EnvValue | Tainted | Derived | Unknown
 
 
 # --- IR for a single variable ---
@@ -56,7 +55,7 @@ class SymbolicStore:
     def get(self, name: str) -> Value:
         return self.vars.get(name, Unknown()).value
 
-    def copy(self) -> "SymbolicStore":
+    def copy(self) -> SymbolicStore:
         store = SymbolicStore()
         store.vars = self.vars.copy()
         return store

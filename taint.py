@@ -1,8 +1,9 @@
 # taint.py
-from dsl import Rule
 import ast
-from report import Violation
+
 from config import Config
+from dsl import Rule
+from report import Violation
 
 
 def is_tainted_arg(
@@ -49,8 +50,10 @@ def is_tainted_arg(
 
 
 def analyze(
-    tree: ast.Module, config: Config, rules: list[Rule] = []
+    tree: ast.Module, config: Config, rules: list[Rule] | None = None
 ) -> list[Violation]:
+    if rules is None:
+        rules = []
     # names that suggest a variable holds a secret
     tainted = set()
 

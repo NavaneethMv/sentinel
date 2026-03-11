@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+
 import yaml
 
 
@@ -9,7 +10,7 @@ class Config:
 
 
 def load_config() -> Config:
-    with open("config.yaml", "r") as f:
+    with open("config.yaml") as f:
         data = yaml.safe_load(f)
     return Config(
         secrets=set(data.get("secrets", [])),

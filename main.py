@@ -1,10 +1,10 @@
-from pathlib import Path
-from typing import List
 import sys
+from pathlib import Path
+
 from parser import parse_file
 
 
-def find_files(targets: List[str]) -> List[Path]:
+def find_files(targets: list[str]) -> list[Path]:
     file_names = []
     for target in targets:
         path = Path(target)

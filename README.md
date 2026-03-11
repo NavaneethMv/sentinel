@@ -2,9 +2,9 @@ Sentinel is a security property checker for programs.
 
 ### Roadmap
 
-- [ ] Detect secret flowing to output (AST)
-- [ ] Add DSL parser (Lark)
-- [ ] Build symbolic IR
+- [x] Detect secret flowing to output (AST)
+- [x] Add DSL parser (Lark)
+- [In Progress] Build symbolic IR
 - [ ] Encode properties in Z3
 - [ ] Generate counterexamples
 - [ ] Add more properties

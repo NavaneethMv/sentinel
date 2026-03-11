@@ -1,0 +1,2 @@
+NEVER: password -> send;
+NEVER: token -> log;

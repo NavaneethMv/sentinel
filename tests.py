@@ -1,8 +1,9 @@
 # tests.py
-from dsl import Rule
 import ast
-from taint import analyze
+
 from config import Config
+from dsl import Rule
+from taint import analyze
 
 TEST_CONFIG = Config(
     secrets={"api_key", "password", "token", "secret"},

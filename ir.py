@@ -1,32 +1,36 @@
 from dataclasses import dataclass
-from typing import Union
 
-# --- Value types --- 
+# --- Value types ---
 # every value in the program is one of these
+
 
 @dataclass
 class Constant:
-    value: str          # a literal: "abc", "123"
+    value: str  # a literal: "abc", "123"
+
 
 @dataclass
 class EnvValue:
-    key: str            # os.environ.get("API_KEY")
+    key: str  # os.environ.get("API_KEY")
+
 
 @dataclass
 class Tainted:
-    reason: str         # known secret by name
+    reason: str  # known secret by name
+
 
 @dataclass
 class Derived:
-    source: str         # came from another variable
+    source: str  # came from another variable
+
 
 @dataclass
 class Unknown:
-    pass                # we don't know what this is
+    pass  # we don't know what this is
 
 
 # a Value is any of the above
-Value = Union[Constant, EnvValue, Tainted, Derived, Unknown]
+Value = Constant | EnvValue | Tainted | Derived | Unknown
 
 
 # --- IR for a single variable ---
@@ -40,7 +44,8 @@ class IRVar:
 # --- The symbolic store ---
 # maps variable names to what we know about their values
 
-class SymbolicStore():
+
+class SymbolicStore:
     def __init__(self):
         self.vars: dict[str, IRVar] = {}
 
@@ -50,14 +55,14 @@ class SymbolicStore():
     def get(self, name: str) -> Value:
         return self.vars.get(name, Unknown()).value
 
-    def copy(self) -> 'SymbolicStore':
+    def copy(self) -> SymbolicStore:
         store = SymbolicStore()
         store.vars = self.vars.copy()
         return store
 
     def __repr__(self):
         return f"SymbolicStore({self.vars})"
-    
+
     def is_tainted(self, name: str) -> bool:
         value = self.get(name)
         if isinstance(value, Tainted):
@@ -69,7 +74,8 @@ class SymbolicStore():
     def dump(self):
         for name, var in self.vars.items():
             print(f"  {name} → {var.value}")
-    
+
+
 if __name__ == "__main__":
     store = SymbolicStore()
 

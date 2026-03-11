@@ -1,12 +1,14 @@
 import ast
-from ir import SymbolicStore
+
 from config import Config
-import ast
+from ir import SymbolicStore
+
+# import ast
 
 
 def build_store(tree: ast.Module, config: Config) -> SymbolicStore:
-    store = SymbolicStore()
+    # store = SymbolicStore()
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
-            
+            pass

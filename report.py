@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+
 @dataclass
 class Violation:
     var: str
@@ -11,7 +12,7 @@ class Report:
         self.file_name = file_name
         self.violations = violations
         self.passed = self.passed = len(violations) == 0
-    
+
     def print(self):
         print(f"\n{'='*40}")
         print(f"  Sentinel — {self.file_name}")

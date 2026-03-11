@@ -1,5 +1,7 @@
-from lark import Lark, Transformer
 from dataclasses import dataclass
+
+from lark import Lark, Transformer
+
 
 @dataclass
 class Rule:
@@ -9,19 +11,19 @@ class Rule:
 class RuleTransformer(Transformer):
     def rule(self, items):
         return Rule(source=str(items[0].children[0]),
-                    sink=str(items[1].children[0])) 
+                    sink=str(items[1].children[0]))
 
     def start(self, items):
         return items
 
 
 def load_rules(path: str) -> list[Rule]:
-    with open("grammer.lark", "r") as f:
+    with open("grammer.lark") as f:
         grammer = f.read()
-    
-    with open(path, "r") as f:
+
+    with open(path) as f:
         rules = f.read()
-    
+
     parser = Lark(grammer)
     tree = parser.parse(rules)
     return RuleTransformer().transform(tree)

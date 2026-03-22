@@ -1,6 +1,9 @@
 start: rule+    
 
-rule: "NEVER" ":" source "->" sink ";"
+rule: source_rule | var_rule
+
+source_rule: "NEVER" "SOURCE" ":" NAME "->" NAME
+var_rule: "NEVER" "VAR" ":" NAME "->" NAME
 
 source: NAME
 sink: NAME

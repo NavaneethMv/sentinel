@@ -2,8 +2,17 @@
 import ast
 
 from config import Config
-from dsl import Rule
+from dsl import SourceRule, VarRule
+from ir import EnvValue, Tainted
+from ir_builder import build_store
 from report import Violation
+
+# map source names to IR types
+SOURCE_MAP = {
+    "env": EnvValue,
+    "file": Tainted,
+    "input": Tainted,
+}
 
 
 def is_tainted_arg(
@@ -50,7 +59,7 @@ def is_tainted_arg(
 
 
 def analyze(
-    tree: ast.Module, config: Config, rules: list[Rule] | None = None
+    tree: ast.Module, config: Config, rules: list | None = None
 ) -> list[Violation]:
     if rules is None:
         rules = []
@@ -64,6 +73,8 @@ def analyze(
     violations = []
 
     return_to_func: dict[int, str] = {}
+
+    store = build_store(tree, config)
 
     # print(ast.dump(tree, indent=4))
 
@@ -116,23 +127,49 @@ def analyze(
             elif isinstance(node.func, ast.Attribute):
                 name = node.func.attr
 
+            config_fired = False
             if name and name in config.sinks:
                 for arg in node.args:
-                    if is_tainted_arg(arg, tainted, config, tainted_func):
+                    # check IR store for taint: print(api_key) where api_key is tainted
+                    if isinstance(arg, ast.Name) and store.is_tainted(arg.id):
+                        violations.append(
+                            Violation(var=arg.id, sink=name, line=node.lineno)
+                        )
+                        config_fired = True
+                    # check if the argument is tainted by name or DSL rules / old method
+                    elif is_tainted_arg(arg, tainted, config, tainted_func):
                         violations.append(
                             Violation(var="secret", sink=name, line=node.lineno)
                         )
+                        config_fired = True
 
-            for rule in rules:
-                if name == rule.sink:
-                    for arg in node.args:
-                        if is_tainted_arg(arg, tainted, config, tainted_func):
-                            violations.append(
-                                Violation(
-                                    var="secret",
-                                    sink=name,
-                                    line=node.lineno,
-                                )
-                            )
+            if not config_fired:
+                for rule in rules:
+                    if name == rule.sink:
+                        for arg in node.args:
+                            if isinstance(rule, SourceRule):
+                                # check origin in the IR store
+                                value = store.get(arg.id)
+                                ir_type = SOURCE_MAP.get(rule.source)
+                                if ir_type and isinstance(value, ir_type):
+                                    violations.append(
+                                        Violation(
+                                            var=arg.id, sink=name, line=node.lineno
+                                        )
+                                    )
+                            elif isinstance(rule, VarRule):
+                                # check variable name
+                                if isinstance(arg, ast.Name) and arg.id == rule.source:
+                                    violations.append(
+                                        Violation(
+                                            var=arg.id, sink=name, line=node.lineno
+                                        )
+                                    )
+                                elif is_tainted_arg(arg, tainted, config, tainted_func):
+                                    violations.append(
+                                        Violation(
+                                            var=rule.source, sink=name, line=node.lineno
+                                        )
+                                    )
 
     return violations

@@ -1,2 +1,5 @@
-NEVER: password -> send;
-NEVER: token -> log;
+NEVER SOURCE: env -> print
+NEVER SOURCE: env -> log
+NEVER SOURCE: file -> send
+NEVER VAR: db_password -> write
+NEVER VAR: token -> print

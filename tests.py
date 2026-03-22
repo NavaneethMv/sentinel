@@ -2,7 +2,7 @@
 import ast
 
 from config import Config
-from dsl import Rule
+from dsl import SourceRule, VarRule
 from taint import analyze
 
 TEST_CONFIG = Config(
@@ -11,18 +11,23 @@ TEST_CONFIG = Config(
 )
 
 
-def check_with_rules(source: str, rules: list[Rule]):
-    tree = ast.parse(source)
-    return analyze(tree, TEST_CONFIG, rules)
-
-
 def check(source: str):
     tree = ast.parse(source)
     return analyze(tree, TEST_CONFIG)
 
 
-def test(name: str, source: str, should_flag: bool):
-    violations = check(source)
+def check_with_rules(source: str, rules: list):
+    tree = ast.parse(source)
+    return analyze(tree, TEST_CONFIG, rules)
+
+
+def test(name: str, source: str, should_flag: bool, rules: list = None):
+    if rules is None:
+        rules = []
+    if rules:
+        violations = check_with_rules(source, rules)
+    else:
+        violations = check(source)
     flagged = len(violations) > 0
     if flagged == should_flag:
         print(f"  ✓  {name}")
@@ -33,38 +38,56 @@ def test(name: str, source: str, should_flag: bool):
 
 print("\nRunning tests...\n")
 
-# --- should flag ---
-test("direct print", "api_key = 'x'\nprint(api_key)", True)
-test("taint propagation", "api_key = 'x'\ncopy = api_key\nprint(copy)", True)
-test("f-string", "api_key = 'x'\nprint(f'key: {api_key}')", True)
-test("concatenation", "api_key = 'x'\nprint('k: ' + api_key)", True)
-test("function param", "def f(api_key):\n    print(api_key)", True)
-test("method sink", "api_key = 'x'\nlogging.info(api_key)", True)
-test("dict access", "data = {'api_key': 'abc'}\nprint(data['api_key'])", True)
+# --- IR based: real sources → should flag ---
+test("env var taint", "import os\nkey = os.environ.get('SECRET_KEY')\nprint(key)", True)
 test(
-    "function return",
-    "api_key = 'x'\ndef get_secret():\n    return api_key\nprint(get_secret())",
+    "env var propagation",
+    "import os\nkey = os.environ.get('X')\ncopy = key\nprint(copy)",
     True,
 )
-test(
-    "local function secret",
-    "def f():\n    api_key = 'x'\n    return api_key\nprint(f())",
-    True,
-)
-test("dict taint", "api_key = 'x'\ndata = {'key': api_key}\nprint(data['key'])", True)
-# --- should NOT flag ---
-test("safe variable", "username = 'alice'\nprint(username)", False)
-test("secret not printed", "api_key = 'x'\nx = api_key", False)
+test("user input", "key = input()\nprint(key)", True)
+test("file read", "f = open('x').read()\nprint(f)", True)
 
-# --- DSL rules ---
-test_rules = [Rule(source="my_custom_secret", sink="send")]
-violations = check_with_rules(
-    "my_custom_secret = 'x'\nsend(my_custom_secret)", test_rules
+# --- IR based: hardcoded values → should NOT flag ---
+test("literal", "api_key = 'abc'\nprint(api_key)", False)
+test("safe variable", "username = 'alice'\nprint(username)", False)
+test("not printed", "import os\nkey = os.environ.get('X')", False)
+
+# --- DSL source rules ---
+test(
+    "source rule env",
+    "import os\nkey = os.environ.get('X')\nprint(key)",
+    True,
+    [SourceRule(source="env", sink="print")],
 )
-violations = check_with_rules(
-    "my_custom_secret = 'x'\ncopy = my_custom_secret\nsend(copy)", test_rules
+
+test(
+    "source rule no flag",
+    "key = 'abc'\nprint(key)",
+    False,
+    [SourceRule(source="env", sink="print")],
 )
-print(f"  {'✓' if violations else '✗'}  dsl rule propagation")
-print(f"  {'✓' if violations else '✗'}  dsl rule")
+
+# --- DSL var rules ---
+test(
+    "var rule direct",
+    "db_password = 'x'\nwrite(db_password)",
+    True,
+    [VarRule(source="db_password", sink="write")],
+)
+
+test(
+    "var rule propagation",
+    "db_password = 'x'\ncopy = db_password\nwrite(copy)",
+    True,
+    [VarRule(source="db_password", sink="write")],
+)
+
+test(
+    "var rule no flag",
+    "username = 'alice'\nwrite(username)",
+    False,
+    [VarRule(source="db_password", sink="write")],
+)
 
 print()

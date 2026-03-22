@@ -53,7 +53,9 @@ class SymbolicStore:
         self.vars[name] = IRVar(name, value, line)
 
     def get(self, name: str) -> Value:
-        return self.vars.get(name, Unknown()).value
+        if name in self.vars:
+            return self.vars[name].value
+        return Unknown()  # ← just return Unknown(), no .value
 
     def copy(self) -> SymbolicStore:
         store = SymbolicStore()
@@ -67,6 +69,8 @@ class SymbolicStore:
         value = self.get(name)
         if isinstance(value, Tainted):
             return True
+        if isinstance(value, EnvValue):
+            return True  # env values are considered tainted
         if isinstance(value, Derived):
             return self.is_tainted(value.source)
         return False

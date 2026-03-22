@@ -3,21 +3,35 @@ from dataclasses import dataclass
 from lark import Lark, Transformer
 
 
+# source rule like envvar, file, network, etc. must never reach sink rule like log, console, file, network, etc.
 @dataclass
-class Rule:
+class SourceRule:
+    source: str
+    sink: str
+
+
+# var rule where api_key, password, etc. must never reach log, console, file, network, etc. - like users can specify
+@dataclass
+class VarRule:
     source: str
     sink: str
 
 
 class RuleTransformer(Transformer):
+    def source_rule(self, items):
+        return SourceRule(source=str(items[0]), sink=str(items[1]))
+
+    def var_rule(self, items):
+        return VarRule(source=str(items[0]), sink=str(items[1]))
+
     def rule(self, items):
-        return Rule(source=str(items[0].children[0]), sink=str(items[1].children[0]))
+        return items[0]
 
     def start(self, items):
         return items
 
 
-def load_rules(path: str) -> list[Rule]:
+def load_rules(path: str) -> list:
     with open("grammer.lark") as f:
         grammer = f.read()
 
@@ -32,4 +46,4 @@ def load_rules(path: str) -> list[Rule]:
 if __name__ == "__main__":
     rules = load_rules("sentinel.rules")
     for r in rules:
-        print(f"Rule: {r.source} must never reach {r.sink}")
+        print(r)

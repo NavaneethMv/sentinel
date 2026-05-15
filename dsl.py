@@ -32,13 +32,13 @@ class RuleTransformer(Transformer):
 
 
 def load_rules(path: str) -> list:
-    with open("grammer.lark") as f:
-        grammer = f.read()
+    with open("grammar.lark") as f:
+        grammar = f.read()
 
     with open(path) as f:
         rules = f.read()
 
-    parser = Lark(grammer)
+    parser = Lark(grammar)
     tree = parser.parse(rules)
     return RuleTransformer().transform(tree)
 

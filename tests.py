@@ -36,6 +36,20 @@ def test(name: str, source: str, should_flag: bool, rules: list = None):
         print(f"  ✗  {name} — expected {expected}")
 
 
+def test_count(name: str, source: str, expected: int, rules: list = None):
+    if rules is None:
+        rules = []
+    if rules:
+        violations = check_with_rules(source, rules)
+    else:
+        violations = check(source)
+    got = len(violations)
+    if got == expected:
+        print(f"  ✓  {name}")
+    else:
+        print(f"  ✗  {name} — expected {expected} violation(s), got {got}")
+
+
 print("\nRunning tests...\n")
 
 # --- IR based: real sources → should flag ---
@@ -88,6 +102,88 @@ test(
     "username = 'alice'\nwrite(username)",
     False,
     [VarRule(source="db_password", sink="write")],
+)
+
+# --- flow-sensitive: same var, two states ---
+test_count(
+    "reorder safe-then-tainted",
+    "import os\nx = 'abc'\nprint(x)\nx = os.environ.get('K')\nprint(x)",
+    1,
+)
+
+test_count(
+    "reorder tainted-then-safe",
+    "import os\nx = os.environ.get('K')\nprint(x)\nx = 'abc'\nprint(x)",
+    1,
+)
+
+# --- function param via IR ---
+test(
+    "function param config.secrets name",
+    "def f(api_key):\n    print(api_key)",
+    True,
+)
+
+test(
+    "function param safe name",
+    "def f(username):\n    print(username)",
+    False,
+)
+
+# --- Z3 path feasibility ---
+test(
+    "dead code if False",
+    "import os\nkey = os.environ.get('X')\nif False:\n    print(key)",
+    False,
+)
+
+test(
+    "live code if True",
+    "import os\nkey = os.environ.get('X')\nif True:\n    print(key)",
+    True,
+)
+
+test(
+    "impossible compound",
+    "import os\nkey = os.environ.get('X')\nif x > 10 and x < 5:\n    print(key)",
+    False,
+)
+
+test(
+    "constrained var unreachable",
+    "import os\nkey = os.environ.get('X')\nx = 5\nif x > 10:\n    print(key)",
+    False,
+)
+
+test(
+    "constrained var reachable",
+    "import os\nkey = os.environ.get('X')\nx = 5\nif x > 0:\n    print(key)",
+    True,
+)
+
+test_count(
+    "else branch unreachable",
+    "import os\nkey = os.environ.get('X')\nx = 5\nif x > 0:\n    print(key)\nelse:\n    print(key)",
+    1,
+)
+
+# --- Phase 11b: env merge after branches ---
+test(
+    "var reassigned in branch becomes unknown",
+    "import os\nkey = os.environ.get('X')\nx = 5\nif cond:\n    x = 100\nif x > 10:\n    print(key)",
+    True,
+)
+
+test(
+    "var untouched in branch keeps constraint",
+    "import os\nkey = os.environ.get('X')\nx = 5\nif cond:\n    pass\nif x > 10:\n    print(key)",
+    False,
+)
+
+test(
+    "both branches assign — post merge unknown",
+    "import os\nkey = os.environ.get('X')\nif cond:\n    x = 5\nelse:\n    x = 100\nif x > 50:\n    print(key)",
+    True,
 )
 
 print()

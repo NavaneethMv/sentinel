@@ -12,7 +12,7 @@ class Report:
     def __init__(self, file_name: str, violations: list[Violation]):
         self.file_name = file_name
         self.violations = violations
-        self.passed = self.passed = len(violations) == 0
+        self.passed = len(violations) == 0
 
     def print(self):
         print(f"\n{'=' * 40}")

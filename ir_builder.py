@@ -1,3 +1,25 @@
+"""AST → IR translation.
+
+`infer_value(expr, store, config)` decides what IR value a Python expression
+holds. Extend this when teaching Sentinel to recognize new origins.
+
+Currently recognized origins:
+
+  "abc", 42              → Constant
+  os.environ.get("K")    → EnvValue
+  os.getenv("K")         → EnvValue
+  input()                → Tainted("user input")
+  open(...).read()       → Tainted("file read")
+  another_var            → Derived("another_var")
+  anything else          → Unknown
+
+`build_store` is a demo/debug helper that walks the whole AST and populates
+a store in one shot. The main analyzer (`taint.py`) no longer uses it — it
+builds the store sequentially as it walks statements (flow-sensitive).
+
+See ARCHITECTURE.md §4 (origin recognizers) and §8 (extending).
+"""
+
 import ast
 
 from config import Config

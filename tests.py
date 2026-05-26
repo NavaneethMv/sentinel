@@ -1,4 +1,21 @@
-# tests.py
+"""Hand-rolled test runner — no pytest dependency.
+
+Two helpers:
+
+  test(name, source, should_flag, rules=None)
+      Asserts the source flags (or doesn't) — doesn't care about count.
+
+  test_count(name, source, expected, rules=None)
+      Asserts the exact violation count. Use for flow-sensitive cases
+      where some sinks should fire and others should not.
+
+`TEST_CONFIG` is fixed inside this file so tests don't depend on the
+on-disk `config.yaml`.
+
+Add tests grouped by the property they exercise — IR origins, DSL rules,
+flow-sensitive reorder, Z3 path feasibility, branch merge.
+"""
+
 import ast
 
 from config import Config
@@ -183,6 +200,50 @@ test(
 test(
     "both branches assign — post merge unknown",
     "import os\nkey = os.environ.get('X')\nif cond:\n    x = 5\nelse:\n    x = 100\nif x > 50:\n    print(key)",
+    True,
+)
+
+# --- Phase 11c: φ-merge precision ---
+test(
+    "both branches same value — merge keeps fact",
+    "import os\nkey = os.environ.get('X')\nif cond:\n    x = 5\nelse:\n    x = 5\nif x > 10:\n    print(key)",
+    False,
+)
+
+test(
+    "both branches above threshold — merge proves unreachable",
+    "import os\nkey = os.environ.get('X')\nif cond:\n    x = 100\nelse:\n    x = 200\nif x < 50:\n    print(key)",
+    False,
+)
+
+test(
+    "both branches below threshold — merge proves reachable",
+    "import os\nkey = os.environ.get('X')\nif cond:\n    x = 5\nelse:\n    x = 10\nif x > 7:\n    print(key)",
+    True,
+)
+
+# --- Phase 11d-i: function return summaries ---
+test(
+    "summary single return — unreachable",
+    "import os\nkey = os.environ.get('X')\ndef threshold():\n    return 5\nx = threshold()\nif x > 10:\n    print(key)",
+    False,
+)
+
+test(
+    "summary single return — reachable",
+    "import os\nkey = os.environ.get('X')\ndef threshold():\n    return 5\nx = threshold()\nif x > 0:\n    print(key)",
+    True,
+)
+
+test(
+    "summary multiple returns — all below threshold",
+    "import os\nkey = os.environ.get('X')\ndef pick():\n    if c:\n        return 5\n    return 10\nx = pick()\nif x > 20:\n    print(key)",
+    False,
+)
+
+test(
+    "summary multiple returns — one above threshold",
+    "import os\nkey = os.environ.get('X')\ndef pick():\n    if c:\n        return 5\n    return 100\nx = pick()\nif x > 50:\n    print(key)",
     True,
 )
 

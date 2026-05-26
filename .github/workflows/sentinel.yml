@@ -1,0 +1,46 @@
+# Starter workflow for projects that consume Sentinel.
+#
+# Copy this file into your project's `.github/workflows/` directory. It
+# assumes:
+#   - Your project uses `uv` for environment management.
+#   - You have a `sentinel.rules` file at the repository root declaring the
+#     security properties you want enforced.
+#   - You install Sentinel as a dev dependency (e.g. `uv add --dev sentinel`).
+#
+# Adjust `uv run sentinel scan <paths>` to point at the directories you want
+# scanned.
+
+name: Sentinel
+
+# This template defaults to manual runs only so it doesn't fail on the Sentinel
+# source repository itself (which has no `src/` directory). After copying into
+# your project, uncomment the `push` / `pull_request` triggers below.
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: ["main", "master"]
+  # pull_request:
+  #   branches: ["main", "master"]
+
+jobs:
+  scan:
+    name: Sentinel scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run Sentinel
+        run: uv run sentinel scan src/

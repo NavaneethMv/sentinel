@@ -1,3 +1,21 @@
+"""Intermediate Representation: value types and the symbolic store.
+
+Every program value is one of five types:
+
+  Constant(value)   — literal: "abc", 42
+  EnvValue(key)     — os.environ.get("K")
+  Tainted(reason)   — known dangerous origin (file read, input, VarRule)
+  Derived(source)   — copied from another variable; follow `.source` to find root
+  Unknown           — no information
+
+`SymbolicStore` maps variable names to `IRVar(name, value, line)`.
+
+`store.is_tainted(name)` walks `Derived` chains: if any link is `Tainted` or
+`EnvValue`, the chain is tainted.
+
+See ARCHITECTURE.md §4 (the IR).
+"""
+
 from dataclasses import dataclass
 
 # --- Value types ---

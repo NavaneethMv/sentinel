@@ -1,4 +1,48 @@
-# taint.py
+"""The analyzer — sequential, flow-sensitive, IR-aware, Z3-aware.
+
+Entry point: `analyze(tree, config, rules) -> list[Violation]`.
+
+Pipeline:
+
+1. `_collect_function_summaries` runs a fixed-point pass to find which
+   functions return tainted values (handles forward references).
+2. `_visit_block(tree.body, ...)` walks top-level statements in source
+   order. Nested blocks (If, While, For, Try, With, FunctionDef) recurse.
+
+Per statement, `_visit_stmt` does (in this order):
+
+  a. Scan sub-expressions for sink calls (`_scan_expr_for_sinks`).
+  b. Update IR store (`_update_store_from_assign`).
+  c. Update name-set fallback (`_update_tainted_from_assign`).
+  d. Update Z3 encoder env + path (`_bind_assign`).
+
+Order matters: sinks scanned BEFORE assigns, so `print(x); x = secret`
+does not retroactively flag the print.
+
+Key data carried through the walk:
+
+  store          — SymbolicStore, IR state at this point
+  tainted        — set[str], heuristic-name fallback
+  ctx.encoder    — Z3 encoder (per-scope: fresh on FunctionDef entry)
+  ctx.tainted_funcs — functions known to return tainted values
+  path           — list[z3.BoolRef], constraints to reach this point
+
+Function scoping: each FunctionDef copies the store + tainted set, seeds
+function params matching `config.secrets` as IR `Tainted`, and creates a
+fresh Z3 Encoder so vars don't bleed across scopes.
+
+Branch handling:
+  - If (Phase 11c): full φ-merge via `_visit_if`. Each branch's path delta
+    is captured; redefined names get a φ-var bound by
+    `Implies(test, phi == body_val) AND Implies(Not(test), phi == else_val)`.
+    Falls back to fresh-on-redefine if test isn't encodable.
+  - While/For/Try (Phase 11b minimal): names assigned inside get fresh
+    unconstrained Z3 vars. Sound but imprecise — loop widening is a future
+    sub-phase.
+
+See ARCHITECTURE.md §5 (analyzer) and §6 (Z3 layer).
+"""
+
 import ast
 from dataclasses import dataclass, field
 
@@ -27,6 +71,10 @@ class Ctx:
     tainted_funcs: set[str] = field(default_factory=set)
     violations: list[Violation] = field(default_factory=list)
     encoder: Encoder = field(default_factory=Encoder)
+    # Phase 11d-i: per-function Z3 return summaries.
+    # Maps func_name → list of possible Z3 return values (literal constants for now).
+    # When `x = func()` is assigned, the analyzer constrains x to one of these.
+    function_summaries: dict = field(default_factory=dict)
 
 
 def _name_tainted(var: str, store: SymbolicStore, tainted: set[str]) -> bool:
@@ -87,6 +135,18 @@ def _bind_assign(
     new_path = path
     for target in node.targets:
         if isinstance(target, ast.Name):
+            # Phase 11d-i: if RHS is a call to a function with a known summary,
+            # bind the target to one of the possible return values.
+            summary = _summary_for_call(node.value, ctx)
+            if summary is not None:
+                first = summary[0]
+                kind = "bool" if z3.is_bool(first) else "int"
+                fresh = ctx.encoder.fresh(target.id, kind)
+                options = [fresh == ret for ret in summary]
+                clause = options[0] if len(options) == 1 else z3.Or(*options)
+                new_path = new_path + [clause]
+                continue
+
             rhs = ctx.encoder.encode(node.value)
             if rhs is None:
                 # un-encodable RHS — still create fresh var so future refs are unconstrained
@@ -96,6 +156,15 @@ def _bind_assign(
                 fresh = ctx.encoder.fresh(target.id, kind)
                 new_path = new_path + [fresh == rhs]
     return new_path
+
+
+def _summary_for_call(expr: ast.expr, ctx: Ctx):
+    """Return the Z3 summary list for `expr` if it's a Call to a summarized func."""
+    if not isinstance(expr, ast.Call):
+        return None
+    if not isinstance(expr.func, ast.Name):
+        return None
+    return ctx.function_summaries.get(expr.func.id)
 
 
 def _update_store_from_assign(
@@ -215,6 +284,97 @@ def _reset_redefined(ctx: Ctx, names: set[str]) -> None:
         ctx.encoder.fresh(name)
 
 
+def _visit_if(
+    stmt: ast.If,
+    store: SymbolicStore,
+    tainted: set[str],
+    ctx: Ctx,
+    path: list[z3.BoolRef],
+) -> list[z3.BoolRef]:
+    """Phase 11c φ-merge.
+
+    After visiting body and orelse:
+      1. Compute each branch's path delta (constraints added during the branch).
+      2. Insert `Or(body_delta, else_delta)` into the post-If path so the solver
+         knows one branch's facts hold.
+      3. For each name assigned in either branch, create a fresh φ-var and bind:
+            And(Implies(test, phi == body_val), Implies(Not(test), phi == else_val))
+         Future references to the name resolve to the φ-var.
+
+    If the test isn't encodable, fall back to Phase 11b (drop redefined to fresh).
+    """
+    _scan_expr_for_sinks(stmt.test, store, tainted, ctx, path)
+    test_enc = ctx.encoder.encode(stmt.test)
+    test_bool = to_bool(test_enc) if test_enc is not None else None
+
+    body_path_in = path + [test_bool] if test_bool is not None else path
+    else_path_in = path + [z3.Not(test_bool)] if test_bool is not None else path
+
+    env_before = ctx.encoder.env.copy()
+    body_path_out = _visit_block(stmt.body, store, tainted, ctx, body_path_in)
+    env_after_body = ctx.encoder.env
+
+    ctx.encoder.env = env_before.copy()
+    else_path_out = _visit_block(stmt.orelse, store, tainted, ctx, else_path_in)
+    env_after_else = ctx.encoder.env
+
+    redefined = _names_assigned(stmt.body) | _names_assigned(stmt.orelse)
+
+    # Un-encodable test → fall back to Phase 11b behavior.
+    if test_bool is None:
+        ctx.encoder.env = env_before
+        _reset_redefined(ctx, redefined)
+        return path
+
+    # Constraints added inside each branch (everything beyond `path`).
+    body_delta = body_path_out[len(path):]
+    else_delta = else_path_out[len(path):]
+
+    body_clause = z3.And(*body_delta) if body_delta else z3.BoolVal(True)
+    else_clause = z3.And(*else_delta) if else_delta else z3.BoolVal(True)
+    merged_clause = z3.Or(body_clause, else_clause)
+
+    # Rebuild env at the merge point: keep pre-If bindings for untouched names,
+    # bind φ-vars for redefined names.
+    ctx.encoder.env = env_before.copy()
+    new_path = path + [merged_clause]
+
+    for name in redefined:
+        body_val = env_after_body.get(name, env_before.get(name))
+        else_val = env_after_else.get(name, env_before.get(name))
+
+        # Name never seen in either branch's env → unreachable case; skip.
+        if body_val is None and else_val is None:
+            continue
+
+        # Name assigned in only one branch: the other side keeps its pre-If
+        # value if one existed, otherwise uses a placeholder unconstrained var.
+        if body_val is None:
+            body_val = ctx.encoder.make_var(name, "int")
+        if else_val is None:
+            else_val = ctx.encoder.make_var(name, "int")
+
+        # Sort mismatch (e.g. one branch sets an int, the other a bool) — drop
+        # precision by leaving the name unconstrained.
+        body_is_bool = z3.is_bool(body_val)
+        else_is_bool = z3.is_bool(else_val)
+        if body_is_bool != else_is_bool:
+            ctx.encoder.fresh(name)
+            continue
+
+        kind = "bool" if body_is_bool else "int"
+        phi = ctx.encoder.make_var(name, kind)
+        ctx.encoder.env[name] = phi
+        new_path = new_path + [
+            z3.And(
+                z3.Implies(test_bool, phi == body_val),
+                z3.Implies(z3.Not(test_bool), phi == else_val),
+            )
+        ]
+
+    return new_path
+
+
 def _visit_block(
     stmts: list[ast.stmt],
     store: SymbolicStore,
@@ -255,27 +415,7 @@ def _visit_stmt(
         return path
 
     if isinstance(stmt, ast.If):
-        _scan_expr_for_sinks(stmt.test, store, tainted, ctx, path)
-        test_enc = ctx.encoder.encode(stmt.test)
-        body_path = path
-        else_path = path
-        if test_enc is not None:
-            test_bool = to_bool(test_enc)
-            if test_bool is not None:
-                body_path = path + [test_bool]
-                else_path = path + [z3.Not(test_bool)]
-
-        env_before = ctx.encoder.env.copy()
-        _visit_block(stmt.body, store, tainted, ctx, body_path)
-        # orelse sees the same starting env as body, not body's mutations
-        ctx.encoder.env = env_before.copy()
-        _visit_block(stmt.orelse, store, tainted, ctx, else_path)
-        # post-If: any name assigned in either branch becomes unconstrained
-        ctx.encoder.env = env_before
-        _reset_redefined(
-            ctx, _names_assigned(stmt.body) | _names_assigned(stmt.orelse)
-        )
-        return path
+        return _visit_if(stmt, store, tainted, ctx, path)
 
     if isinstance(stmt, (ast.While, ast.For)):
         if isinstance(stmt, ast.While):
@@ -339,6 +479,37 @@ def _visit_stmt(
     return path
 
 
+def _collect_z3_summaries(tree: ast.Module, ctx: Ctx) -> None:
+    """Phase 11d-i: build a Z3 return-value summary per function.
+
+    Only summarizes functions whose every Return statement returns a literal
+    bool/int constant. Mixed or complex returns are left un-summarized — the
+    analyzer falls back to existing behavior (the result is treated as Unknown
+    in Z3, which keeps any sink reachable).
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        returns: list = []
+        summarizable = True
+        for child in ast.walk(node):
+            if isinstance(child, ast.Return) and child.value is not None:
+                if not isinstance(child.value, ast.Constant):
+                    summarizable = False
+                    break
+                v = child.value.value
+                # bool must be checked before int — `bool` is a subclass of `int` in Python
+                if isinstance(v, bool):
+                    returns.append(z3.BoolVal(v))
+                elif isinstance(v, int):
+                    returns.append(z3.IntVal(v))
+                else:
+                    summarizable = False
+                    break
+        if summarizable and returns:
+            ctx.function_summaries[node.name] = returns
+
+
 def _collect_function_summaries(tree: ast.Module, ctx: Ctx) -> None:
     for _ in range(len(list(ast.walk(tree))) + 1):
         before = len(ctx.tainted_funcs)
@@ -390,6 +561,7 @@ def analyze(
     )
 
     _collect_function_summaries(tree, ctx)
+    _collect_z3_summaries(tree, ctx)
 
     store = SymbolicStore()
     tainted: set[str] = set()

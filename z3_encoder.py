@@ -1,3 +1,24 @@
+"""Z3 layer: encode Python expressions as Z3 constraints, check reachability.
+
+Two responsibilities:
+
+1. `Encoder` translates a Python AST expression to a Z3 expression. It uses
+   SSA-lite: each Python name maps to its *current* Z3 variable; `fresh(name)`
+   on every Assign creates a new versioned var so old constraints don't conflict.
+
+2. `is_path_satisfiable(path)` asks the solver whether a list of boolean
+   constraints can all hold at once. If unsat, the program point is unreachable
+   and the analyzer can skip the violation.
+
+Scope (Phase 11a):
+- Booleans and Ints only. No strings, no floats.
+- Single-op `Compare` (skips chained `a < b < c`).
+- Returns `None` for anything unencodable — the analyzer treats that as
+  "no constraint added," which is conservative (path stays satisfiable).
+
+See ARCHITECTURE.md §6 (Z3 layer).
+"""
+
 import ast
 
 import z3
@@ -40,7 +61,7 @@ class Encoder:
         self.env: dict[str, z3.ExprRef] = {}
         self._counter = 0
 
-    def _new(self, name: str, kind: str) -> z3.ExprRef:
+    def make_var(self, name: str, kind: str) -> z3.ExprRef:
         self._counter += 1
         ident = f"{name}_{self._counter}"
         if kind == "bool":
@@ -48,13 +69,13 @@ class Encoder:
         return z3.Int(ident)
 
     def fresh(self, name: str, kind: str = "int") -> z3.ExprRef:
-        v = self._new(name, kind)
+        v = self.make_var(name, kind)
         self.env[name] = v
         return v
 
     def get(self, name: str) -> z3.ExprRef:
         if name not in self.env:
-            self.env[name] = self._new(name, "int")
+            self.env[name] = self.make_var(name, "int")
         return self.env[name]
 
     def encode(self, expr: ast.expr):

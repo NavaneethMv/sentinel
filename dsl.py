@@ -1,3 +1,18 @@
+"""DSL parser for `sentinel.rules` (the hard/project-declared tier).
+
+Two rule kinds:
+
+- `NEVER SOURCE: <origin> -> <sink>` — `SourceRule`. Origin is `env`/`file`/`input`,
+  matched against IR value types via `SOURCE_MAP` in `taint.py`.
+- `NEVER VAR: <varname> -> <sink>` — `VarRule`. Names a specific variable that
+  should be considered tainted; `build_store` flips its IR value to `Tainted`.
+
+Grammar lives in `grammar.lark`. The Lark `Transformer` converts the parse
+tree into `SourceRule` / `VarRule` dataclasses.
+
+See ARCHITECTURE.md §3.2 (two-tier rule model).
+"""
+
 from dataclasses import dataclass
 
 from lark import Lark, Transformer

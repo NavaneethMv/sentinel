@@ -1,3 +1,13 @@
+"""Violation dataclass and Report printer.
+
+`Violation(var, sink, line)` — a single finding. `var` is the offending
+variable name (or "secret" for non-Name args like f-strings); `sink` is
+the function name that received the tainted value.
+
+`Report.passed` is True iff there are zero violations. `main.py` reads it
+to compute the process exit code.
+"""
+
 from dataclasses import dataclass
 
 
